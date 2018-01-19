@@ -1,15 +1,14 @@
 package ambari
 
 import (
-	"github.com/dghubble/sling"
-	"net/http"
+	restClient "github.com/disaster37/go-ambari-rest"
 )
 
 type Client struct {
 	APIURL   string
 	Login    string
 	Password string
-	client   *Sling
+	client   *restClient.AmbariClient
 }
 
 func NewClient() *Client {
@@ -17,19 +16,21 @@ func NewClient() *Client {
 }
 
 // Permit to get rest API client
-func (c *Client) Client() *Sling {
+func (c *Client) Client() *restClient.AmbariClient {
+
 	if c.client == nil {
-		if APIURL == "" {
+		if c.APIURL == "" {
 			panic("You must provide APIURL")
 		}
-		if Login == "" {
+		if c.Login == "" {
 			panic("You must provide Login")
 		}
-		if Password == "" {
+		if c.Password == "" {
 			panic("You must provide Password")
 		}
 
-		c.client = sling.New().Base(c.APIURL).Set("X-Requested-By", "ambari").SetBasicAuth(c.Login, c.Password)
+		c.client = restClient.New(c.APIURL, c.Login, c.Password)
+		c.client.DisableVerifySSL()
 	}
 
 	return c.client

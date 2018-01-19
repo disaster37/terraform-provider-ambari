@@ -1,9 +1,10 @@
 package ambari
 
 import (
-	"fmt"
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform/terraform"
 	"github.com/jinzhu/configor"
+	"github.com/pkg/errors"
 )
 
 type CLIConfig struct {
@@ -12,7 +13,7 @@ type CLIConfig struct {
 	Password string
 }
 
-func Provider() *schema.Provider {
+func Provider() terraform.ResourceProvider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
 			"api_url": &schema.Schema{
@@ -42,7 +43,8 @@ func Provider() *schema.Provider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
-			"ambari_role": resourceAmbariPrivilege(),
+			"ambari_privilege": resourceAmbariPrivilege(),
+			"ambari_cluster":   resourceAmbariCluster(),
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{},
@@ -79,13 +81,13 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 
 	if client.APIURL == "" {
-		return nil, fmt.Errorf("No api_url provided")
+		return nil, errors.New("No api_url provided")
 	}
 	if client.Login == "" {
-		return nil, fmt.Errorf("No login provided")
+		return nil, errors.New("No login provided")
 	}
 	if client.Password == "" {
-		return nil, fmt.Errorf("No password provided")
+		return nil, errors.New("No password provided")
 	}
 
 	// Init client

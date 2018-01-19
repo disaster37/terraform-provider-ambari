@@ -2,24 +2,13 @@ package ambari
 
 import (
 	"fmt"
-	"log"
-	"time"
-
-	"github.com/dghubble/sling"
-	"github.com/hashicorp/terraform/helper/resource"
+	restClient "github.com/disaster37/go-ambari-rest"
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/dghubble/sling"
+	"github.com/hashicorp/terraform/helper/validation"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"strconv"
 )
-
-type Privilege struct {
-    PrivilegeInfo struct {
-        PrivilegeId string `json:"privilege_id,omitempty"`,
-        PermissionLabel string `json:"permission_label,omitempty"`,
-        PermissionName string `json:"permission_name"`,
-        PrincipalName string `json:"principal_name"`,
-        PrincipalType string `json:"principal_type"`,
-    } `json:"PrivilegeInfo"`,
-}
 
 func resourceAmbariPrivilege() *schema.Resource {
 	return &schema.Resource{
@@ -45,121 +34,124 @@ func resourceAmbariPrivilege() *schema.Resource {
 				Computed: true,
 			},
 			"permission_name": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice([]string{"CLUSTER.ADMINISTRATOR", "CLUSTER.OPERATOR", "SERVICE.ADMINISTRATOR", "SERVICE.OPERATOR", "CLUSTER.USER"}, true),
 			},
 			"principal_name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
 			},
 			"principal_type": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice([]string{"GROUP", "USER"}, true),
 			},
 		},
 	}
 }
 
-
 func resourceAmbariPrivilegeCreate(d *schema.ResourceData, meta interface{}) error {
-	log.Printf("[INFO][ambari] Creating Privilege: %s", d.Privilege_id())
+	log.Info("Creating Privilege")
 	clusterName := d.Get("cluster_name").(string)
 	permissionName := d.Get("permission_name").(string)
 	principalName := d.Get("principal_name").(string)
 	principalType := d.Get("principal_type").(string)
-	
-	client := meta.(*Client).Client()
-	path := fmt.Sprintf("/clusters/%s/privileges", clusterName)
-	
-	privilege := &Privilege {
-        PrivilegeInfo.PermissionName: permissionName,
-        PrivilegeInfo.PrincipalName: principalName,
-        PrivilegeInfo.PrincipalType: principalType,
-	}
 
-    //Create the new privilege
-	rep, err := client.Post(path).BodyJSON(privilege).Request()
+	client := meta.(*Client).Client()
+
+	privilege := &restClient.Privilege{
+		PrivilegeInfo: &restClient.PrivilegeInfo{
+			PermissionName: permissionName,
+			PrincipalName:  principalName,
+			PrincipalType:  principalType,
+		},
+	}
+	log.Debugf("Privilege to create: %s", privilege.String())
+
+	privilege, err := client.CreatePrivilege(clusterName, privilege)
 	if err != nil {
 		return err
 	}
-	
-	// Get the privilege to get it's ID
-	newPrivilege, err := getPrivilege(clusterName, permissionName, principalName, principalType, client)
-	if err != nil {
-	    return nil
-	}
-	if newPrivilege == nil {
-	    return fmt.Errorf("Privilege ID not found")
-	}
-	
-	d.SetId(newPrivilege.PrivilegeInfo.PrivilegeId)
-	log.Printf("[INFO] Privilege ID: %s", d.Id()
-	
+	log.Debugf("Privilege after to create: %s", privilege.String())
+
+	d.SetId(strconv.FormatInt(privilege.PrivilegeInfo.PrivilegeId, 10))
+	log.Infof("Privilege ID: %s", d.Id())
+
 	return resourceAmbariPrivilegeRead(d, meta)
 }
 
 func resourceAmbariPrivilegeRead(d *schema.ResourceData, meta interface{}) error {
-	log.Printf("[INFO] Refreshing Privilege: %s", d.Id())
-	
+	log.Infof("Refreshing Privilege: %s", d.Id())
+
 	clusterName := d.Get("cluster_name").(string)
-	privilegeId := d.Id()
+	privilegeId, _ := strconv.ParseInt(d.Id(), 10, 64)
 	client := meta.(*Client).Client()
-	path := fmt.Sprintf("/clusters/%s/privileges/%s", clusterName, privilegeId)
-	
-	privilege := new(Privilege)
-    rep, err := client.GET(path).ReceiveSuccess(privilege)
-    if err != nil {
-        return err
-    }
-	if privilege == nil {
-		return fmt.Errorf("Privilege not found with ID %s", privilegeId)
+	log.Debugf("ClusterName: %s", clusterName)
+	log.Debugf("PrivilegeId: %d", privilegeId)
+
+	privilege, err := client.Privilege(clusterName, privilegeId)
+	if err != nil {
+		return err
 	}
 
-	log.Printf("[INFO] Privilege Name: %s", privilege.PrivilegeInfo.PrincipalName)
+	if privilege == nil {
+		return errors.New(fmt.Sprintf("Privilige with id %d not found", privilegeId))
+	}
 
+	log.Debug("Privilege after read: %s", privilege.String())
+	log.Infof("Privilege ID : %s", privilege.PrivilegeInfo.PrincipalName)
+
+	d.Set("privilege_id", d.Id())
 	d.Set("permission_label", privilege.PrivilegeInfo.PermissionLabel)
 	d.Set("permission_name", privilege.PrivilegeInfo.PermissionName)
 	d.Set("principal_name", privilege.PrivilegeInfo.PrincipalName)
 	d.Set("principal_type", privilege.PrivilegeInfo.PrincipalType)
 
-
 	return nil
 }
 
 func resourceAmbariPrivilegeUpdate(d *schema.ResourceData, meta interface{}) error {
-	log.Printf("[INFO] Updating Privilege: %s", d.Id())
+	log.Infof("Updating Privilege: %s", d.Id())
 	clusterName := d.Get("cluster_name").(string)
-	privilegeId := d.Id()
+	privilegeId, _ := strconv.ParseInt(d.Id(), 10, 64)
 	permissionName := d.Get("permission_name").(string)
 	principalName := d.Get("principal_name").(string)
 	principalType := d.Get("principal_type").(string)
 	client := meta.(*Client).Client()
-	path := fmt.Sprintf("/clusters/%s/privileges/%s", clusterName, privilegeId)
 
-
-	privilege := &Privilege {
-        PrivilegeInfo.PermissionName: permissionName,
-        PrivilegeInfo.PrincipalName: principalName,
-        PrivilegeInfo.PrincipalType: principalType,
+	// We do nothink if cluster name change
+	privilege := &restClient.Privilege{
+		PrivilegeInfo: &restClient.PrivilegeInfo{
+			PermissionName: permissionName,
+			PrincipalName:  principalName,
+			PrincipalType:  principalType,
+			PrivilegeId:    privilegeId,
+		},
 	}
+	log.Debugf("Privilege to update: %s", privilege.String())
 
-    //Create the new privilege
-	rep, err := client.Put(path).BodyJSON(privilege).Request()
+	privilege, err := client.UpdatePrivilege(clusterName, privilege)
 	if err != nil {
 		return err
 	}
+	log.Debugf("Privilege after update: %s", privilege.String())
+	log.Infof("New Privilege ID: %d", privilege.PrivilegeInfo.PrivilegeId)
+
+	d.SetId(strconv.FormatInt(privilege.PrivilegeInfo.PrivilegeId, 10))
 
 	return resourceAmbariPrivilegeRead(d, meta)
 }
 
 func resourceAmbariPrivilegeDelete(d *schema.ResourceData, meta interface{}) error {
-	log.Printf("[INFO] Deleting Privilege: %s", d.Id())
+	log.Infof("Deleting Privilege: %s", d.Id())
 	clusterName := d.Get("cluster_name").(string)
-	privilegeId := d.Id()
+	privilegeId, _ := strconv.ParseInt(d.Id(), 10, 64)
 	client := meta.(*Client).Client()
-	path := fmt.Sprintf("/clusters/%s/privileges/%s", clusterName, privilegeId)
-	
-	err := client.Delete(path).Request()
+
+	log.Debugf("ClusterName: %s", clusterName)
+	log.Debugf("PrivilegeId: %d", privilegeId)
+	err := client.DeletePrivilege(clusterName, privilegeId)
 	if err != nil {
 		return err
 	}
@@ -169,9 +161,7 @@ func resourceAmbariPrivilegeDelete(d *schema.ResourceData, meta interface{}) err
 }
 
 func resourceAmbariPrivilegeImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	clusterName := d.Get("cluster_name").(string)
-	privilegeId := d.Id()
-	
+
 	err := resourceAmbariPrivilegeRead(d, meta)
 	if err != nil {
 		return []*schema.ResourceData{}, err
@@ -179,32 +169,3 @@ func resourceAmbariPrivilegeImport(d *schema.ResourceData, meta interface{}) ([]
 
 	return []*schema.ResourceData{d}, nil
 }
-
-
-
-// Permit to get privilege by search to obtain the ID
-// Return the privilege if found
-// Return nil if not found
-func getPrivilege(string clusterName, string permissionName, string principalName, string principal_type, client *Sling ) (*Privilege, error) {
-    
-    if client == nil {
-        fmt.Errorf("Client must be provided")
-    }
-    if clusterName == "" {
-        fmt.Errorf("ClusterName must be provided")
-    }
-    
-    path := fmt.Sprintf("/clusters/%s/privileges?PrivilegeInfo/permission_name=\"%s\"&PrivilegeInfo/principal_name=\"%s\"&PrivilegeInfo/principal_type=\"%s\"", clusterName, permissionName, principalName, principalType)
-    privileges := new([]Privilege)
-    rep, err := client.GET(path).ReceiveSuccess(privileges)
-    if err != nil {
-        return err
-    }
-    
-    if len(privileges) == 1 {
-        return &privileges[0]
-    } else {
-        return nil
-    }
-}
-
